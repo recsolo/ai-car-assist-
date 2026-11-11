@@ -213,3 +213,12 @@ def stt_status() -> dict:
     except Exception as exc:
         return {"available": False, "reason": f"no usable microphone ({exc})"}
     return {"available": True, "reason": ""}
+
+
+def warm_up() -> None:
+    """Load the speech model ahead of time so the first spoken question is not slow."""
+    if stt_status()["available"]:
+        try:
+            _load_whisper()
+        except VoiceError as exc:
+            print(exc)

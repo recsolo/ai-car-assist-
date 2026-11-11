@@ -56,9 +56,13 @@ Download Ollama from [ollama.com](https://ollama.com/download), install it, then
 ollama pull llama3.2:3b
 ```
 
-### 3. Get the project and install packages
+### 3. Start the app
 
-Open a terminal in the project folder.
+The quick way: double-click **`run.bat`** on Windows, or run `./run.sh` on Mac or Linux.
+The first run creates the virtual environment and installs the packages, which takes a few
+minutes. After that it starts the app and opens the page in your browser.
+
+To do the same steps by hand, open a terminal in the project folder.
 
 Windows:
 
@@ -80,13 +84,13 @@ On Linux, voice also needs two system packages: `sudo apt install libportaudio2 
 
 Run the activate command again every time you open a new terminal for this project.
 
-### 4. Start the app
+Then start the app:
 
 ```
 python app.py
 ```
 
-Open <http://127.0.0.1:8000> in your browser.
+Your browser opens <http://127.0.0.1:8000> automatically.
 
 The pills at the top of the page show what is working: the AI model, the microphone, and how
 many codes are loaded. The first time you use voice, the speech model (about 75 MB) downloads
@@ -101,7 +105,12 @@ card and reads it aloud. Then ask a follow-up such as *"Is it safe to drive to w
 **By typing:** enter `P0420`, `2015`, `Honda`, `Accord`, `128000` and click **Explain this code**.
 Only the code is required.
 
-The first answer after starting Ollama can take 10 to 30 seconds on a laptop while the model loads.
+The verified facts (safe to drive, cost, causes) appear straight away. The AI's summary for
+your car fills in a few seconds later and is then read aloud.
+
+**Several codes at once:** say or type them together, for example `P0420, P0300`. The app
+explains the most serious one first, lists the others as buttons, and tells the AI about all
+of them, because codes that appear together often share one cause.
 
 ## Adding more codes
 
@@ -142,6 +151,10 @@ Set these environment variables before starting the app if you want to change a 
 | `WHISPER_MODEL` | `base.en` | Speech model. `small.en` is more accurate and slower |
 | `PORT` | `8000` | Port for the web page |
 | `HOST` | `127.0.0.1` | Set to `0.0.0.0` to open the page from a phone on the same Wi-Fi |
+| `ALLOWED_HOSTS` | (none) | Extra names the app answers to, such as `garage-pc.local` |
+| `NO_BROWSER` | (none) | Set to `1` to stop the browser opening automatically |
+
+On a phone, open the page by the computer's IP address, for example `http://192.168.1.20:8000`.
 
 From a phone, typing and spoken answers work. The **Speak** button uses the microphone of the
 computer running the app, not the phone's.
@@ -169,6 +182,7 @@ llm.py              talks to Ollama; builds facts-only answers when it is offlin
 parsing.py          finds the code and vehicle details in a sentence
 voice_handler.py    microphone recording, speech-to-text, text-to-speech
 init_db.py          checks and rebuilds the database by hand
+run.bat / run.sh    one-step setup and start
 data/dtc_codes.json the verified code facts (edit this to add codes)
 static/index.html   the web page
 tests/              automated tests
@@ -194,7 +208,7 @@ Fixes to problems in the original guide's code:
 - **Follow-up answers were inserted into the page as raw HTML.** Everything from the model is
   now inserted as plain text.
 - **Any website open in your browser could trigger the microphone.** Cross-site requests are
-  now refused.
+  now refused, and the app only answers to `localhost` or an IP address.
 - **The model could invent prices and causes.** Those fields now come only from the database,
   and the model's reply is forced into a fixed JSON shape.
 - **Malformed model output caused a server error.** The app now falls back to a facts-only answer.
@@ -207,6 +221,12 @@ Fixes to problems in the original guide's code:
 Improvements:
 
 - Recording stops when you stop talking instead of after a fixed 8 seconds.
+- The verified facts appear instantly; you no longer wait for the AI to see whether the car
+  is safe to drive.
+- Several codes can be explained together, most serious first.
+- One-step launchers (`run.bat`, `run.sh`), and both models load in the background at startup
+  so the first question is not slow.
+- The assistant stops talking when you press the microphone, so it does not record itself.
 - Works without Ollama, answering from the verified facts.
 - Mileage-aware notes for cars over 100,000 miles (Phase 4 in the guide).
 - Remembers past lookups and mentions earlier codes for the same car (Phase 5).

@@ -50,7 +50,7 @@ def cost_range(fact: dict) -> str:
 
 
 def facts_block(vehicle: dict, fact: dict, mileage_note: Optional[str],
-                past_codes: list[str]) -> str:
+                past_codes: list[str], related: list[dict] = ()) -> str:
     lines = [
         f"Vehicle: {describe_vehicle(vehicle)}",
         f"Code: {fact['code']}",
@@ -67,6 +67,9 @@ def facts_block(vehicle: dict, fact: dict, mileage_note: Optional[str],
     ]
     if mileage_note:
         lines.append(f"- note for this mileage: {mileage_note}")
+    for other in related:
+        lines.append(f"- also present on this car right now: {other['code']} "
+                     f"({other['title']}): {other['plain_english']}")
     if past_codes:
         lines.append(f"- codes seen earlier on this same vehicle: {', '.join(past_codes)}")
     return "\n".join(lines)
@@ -124,10 +127,10 @@ def _as_text(value) -> str:
 
 
 def explain(vehicle: dict, fact: dict, mileage_note: Optional[str],
-            past_codes: list[str]) -> dict:
+            past_codes: list[str], related: list[dict] = ()) -> dict:
     """Ask the model for a summary, advice and a spoken answer grounded in the facts."""
     user = (
-        f"{facts_block(vehicle, fact, mileage_note, past_codes)}\n\n"
+        f"{facts_block(vehicle, fact, mileage_note, past_codes, related)}\n\n"
         "Explain this code to the driver. Return JSON with exactly these keys:\n"
         "- summary: 2 sentences on what is going on, for this specific vehicle.\n"
         "- advice: 2 to 3 sentences on what the driver should do next, cheapest checks first.\n"
@@ -147,10 +150,11 @@ def explain(vehicle: dict, fact: dict, mileage_note: Optional[str],
 
 
 def followup(vehicle: dict, fact: dict, mileage_note: Optional[str], past_codes: list[str],
-             history: list[dict], question: str) -> str:
+             history: list[dict], question: str, related: list[dict] = ()) -> str:
     """Answer a follow-up question about the same vehicle and code."""
     system = (
-        f"{SYSTEM_PROMPT}\n\n{facts_block(vehicle, fact, mileage_note, past_codes)}\n\n"
+        f"{SYSTEM_PROMPT}\n\n"
+        f"{facts_block(vehicle, fact, mileage_note, past_codes, related)}\n\n"
         "Answer the driver's follow-up question in 2 to 4 short spoken-style sentences. "
         "No lists or symbols."
     )
@@ -175,6 +179,15 @@ def status() -> dict:
     return info
 
 
+def warm_up() -> None:
+    """Load the model into memory ahead of time so the first answer is not slow."""
+    try:
+        httpx.post(f"{OLLAMA_URL}/api/generate",
+                   json={"model": MODEL_NAME, "keep_alive": "30m"}, timeout=TIMEOUT)
+    except httpx.HTTPError:
+        pass
+
+
 # --- Answers built straight from the database, used when the model is unavailable ---
 
 def spell_code(code: str) -> str:
@@ -182,11 +195,16 @@ def spell_code(code: str) -> str:
     return " ".join(code)
 
 
-def offline_explain(fact: dict, mileage_note: Optional[str]) -> dict:
+def offline_explain(fact: dict, mileage_note: Optional[str],
+                    related: list[dict] = ()) -> dict:
     checks = fact["next_checks"]
     advice = f"Start here: {checks[0]}. {fact['misdiagnosis_notes']}"
     if mileage_note:
         advice += f" {mileage_note}"
+    also = ""
+    if related:
+        also = (" You also have " + " and ".join(spell_code(o["code"]) for o in related)
+                + ". I started with the most serious code.")
     return {
         "summary": fact["plain_english"],
         "advice": advice,
@@ -196,6 +214,7 @@ def offline_explain(fact: dict, mileage_note: Optional[str]) -> dict:
             + (f"A typical repair costs up to {fact['repair_max']:,} dollars, and the fix "
                "is sometimes free." if fact["repair_min"] == 0 else
                f"A typical repair runs {fact['repair_min']:,} to {fact['repair_max']:,} dollars.")
+            + also
         ),
     }
 

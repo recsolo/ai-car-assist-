@@ -17,7 +17,7 @@ def client(tmp_path, monkeypatch):
     # Point at a closed port so tests never depend on a real Ollama.
     monkeypatch.setattr(llm, "OLLAMA_URL", "http://127.0.0.1:9")
     import app as app_module
-    with TestClient(app_module.app) as c:
+    with TestClient(app_module.app, base_url="http://127.0.0.1:8000") as c:
         yield c
 
 
@@ -188,15 +188,57 @@ def test_cross_site_requests_are_blocked(client):
     r = client.post("/api/listen", json={}, headers={"Origin": "https://evil.example"})
     assert r.status_code == 403
     ok = client.post("/api/explain", json={"code": "P0420"},
-                     headers={"Origin": "http://testserver"})
+                     headers={"Origin": "http://127.0.0.1:8000"})
     assert ok.status_code == 200
+
+
+@pytest.mark.parametrize("host,allowed", [
+    ("127.0.0.1:8000", True), ("localhost:8000", True), ("192.168.1.20:8000", True),
+    ("[::1]:8000", True), ("evil.example:8000", False), ("127.0.0.1.evil.example", False),
+])
+def test_only_local_addresses_are_served(client, host, allowed):
+    r = client.get("/api/codes", headers={"Host": host})
+    assert (r.status_code == 200) == allowed
+
+
+def test_lookup_is_instant_facts_and_explain_can_skip_history(client, monkeypatch):
+    fake_ollama(monkeypatch, json.dumps({"summary": "AI.", "advice": "A.", "voice_response": "V."}))
+    body = {"vehicle": ACCORD, "code": "P0420"}
+    quick = client.post("/api/lookup", json=body).json()
+    assert quick["source"] == "database" and quick["notice"] is None
+    assert quick["answer"]["summary"] == quick["fact"]["plain_english"]
+    full = client.post("/api/explain", json={**body, "record": False}).json()
+    assert full["source"] == "ai" and full["fact"] == quick["fact"]
+    assert len(client.get("/api/history").json()) == 1
+
+
+def test_several_codes_most_serious_first(client, monkeypatch):
+    sent = fake_ollama(monkeypatch, json.dumps({"summary": "S.", "advice": "A.", "voice_response": "V."}))
+    r = client.post("/api/explain", json={
+        "vehicle": ACCORD, "code": "I have P0420, P0300 and P0999"}).json()
+    assert r["code"] == "P0300"  # high severity beats moderate
+    assert [o["code"] for o in r["related"]] == ["P0420"]
+    assert r["unknown_codes"] == ["P0999"]
+    assert "also present on this car right now: P0420" in sent["messages"][1]["content"]
+
+
+def test_several_codes_offline_voice_mentions_the_others(client):
+    r = client.post("/api/lookup", json={"code": "P0171 P0174"}).json()
+    assert r["code"] == "P0171" and "You also have P 0 1 7 4" in r["answer"]["voice_response"]
+
+
+def test_followup_includes_related_codes(client, monkeypatch):
+    sent = fake_ollama(monkeypatch, "Fix the misfire first.")
+    client.post("/api/followup", json={"vehicle": ACCORD, "code": "P0300",
+                                       "related": ["P0420", "junk"], "question": "Which first?"})
+    assert "also present on this car right now: P0420" in sent["messages"][0]["content"]
 
 
 def test_listen_parses_what_was_heard(client, monkeypatch):
     monkeypatch.setattr(voice_handler, "listen",
                         lambda max_seconds: "P0300 on my 2012 Ford Focus with 90,000 miles")
     r = client.post("/api/listen", json={}).json()
-    assert r["parsed"] == {"code": "P0300", "year": 2012, "make": "Ford",
+    assert r["parsed"] == {"code": "P0300", "codes": ["P0300"], "year": 2012, "make": "Ford",
                            "model": "Focus", "mileage": 90000}
 
 

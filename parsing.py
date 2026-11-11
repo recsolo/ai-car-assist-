@@ -16,8 +16,9 @@ _TENS = {
     "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
     "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
 }
-# Speech-to-text often hears the code letter as a word.
-_LETTERS = {"pee": "p", "pea": "p", "bee": "b", "see": "c", "sea": "c", "you": "u"}
+# Speech-to-text sometimes hears the code letter as a word. "you" and "see" are left out
+# on purpose: "thank you, 2015 Honda" must not turn into the code U2015.
+_LETTERS = {"pee": "p", "pea": "p", "bee": "b"}
 
 _MAKES = {
     "acura": "Acura", "alfa romeo": "Alfa Romeo", "audi": "Audi", "bmw": "BMW",
@@ -91,6 +92,10 @@ def find_codes(text: str) -> list[str]:
         if len(digits) == 4:
             add(m.group(1) + digits)
     return found
+
+
+def is_code(text: str) -> bool:
+    return bool(CODE_RE.match(text.upper()))
 
 
 def pick_code(text: str, known: Iterable[str] = ()) -> Optional[str]:

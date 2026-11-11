@@ -112,6 +112,11 @@ def known_codes() -> set[str]:
     return {r["code"] for r in list_codes()}
 
 
+def brief(fact: dict) -> dict:
+    """The few fields shown for a code that came up alongside the main one."""
+    return {k: fact[k] for k in ("code", "title", "severity", "plain_english")}
+
+
 def mileage_note(fact: dict, mileage: Optional[int]) -> Optional[str]:
     """The high-mileage note for this code, if the car has enough miles for it to apply."""
     if mileage is not None and mileage >= HIGH_MILEAGE:

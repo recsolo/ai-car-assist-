@@ -62,7 +62,9 @@
   .bubble { padding: 9px 13px; border-radius: 12px; max-width: 88%; }
   .bubble.user { align-self: flex-end; background: var(--accent); color: var(--accent-text); }
   .bubble.assistant { align-self: flex-start; background: var(--note-bg); }
-  .history button { font-weight: 500; padding: 6px 12px; font-size: .9rem; }
+  .history button, .related button { font-weight: 500; padding: 6px 12px; font-size: .9rem; }
+  .related { display: flex; flex-wrap: wrap; gap: 8px; }
+  .related button { text-align: left; }
   .disclaimer { color: var(--muted); font-size: .85rem; text-align: center; }
   [hidden] { display: none !important; }
 </style>
@@ -78,7 +80,7 @@
     <p>Say or type your car's trouble code. Try: <em>"What does P0420 mean on my 2015 Honda Accord with 128k miles?"</em></p>
     <form id="form">
       <div class="grid">
-        <label>Code<input id="f-code" list="code-list" placeholder="P0420" autocomplete="off" required></label>
+        <label>Code (or several)<input id="f-code" list="code-list" placeholder="P0420" autocomplete="off" required></label>
         <label>Year<input id="f-year" type="number" min="1980" max="2100" placeholder="2015"></label>
         <label>Make<input id="f-make" placeholder="Honda"></label>
         <label>Model<input id="f-model" placeholder="Accord"></label>
@@ -126,6 +128,8 @@ const $ = (id) => document.getElementById(id);
 let current = null;      // { vehicle, code } for the answer on screen
 let conversation = [];   // follow-up turns for the current answer
 let micReady = false;
+let aiReady = false;
+let requestId = 0;       // lets a newer lookup cancel the display of an older one
 
 // Build elements with textContent only, so model output can never inject HTML.
 function el(tag, props = {}, children = []) {
@@ -169,8 +173,13 @@ function setBusy(busy) {
 
 // ---- Speaking ----
 const ttsMode = $("tts-mode");
+function stopSpeaking() {
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
 function speak(text) {
   if (!text || ttsMode.value === "off") return;
+  // Read codes one character at a time: "P0420" -> "P 0 4 2 0".
+  text = text.replace(/\b[PBCU][0-3][0-9A-F]{3}\b/gi, (code) => code.toUpperCase().split("").join(" "));
   if (ttsMode.value === "browser" && "speechSynthesis" in window) {
     speechSynthesis.cancel();
     speechSynthesis.speak(new SpeechSynthesisUtterance(text));
@@ -180,7 +189,7 @@ function speak(text) {
 }
 ttsMode.addEventListener("change", () => {
   try { localStorage.setItem("ttsMode", ttsMode.value); } catch {}
-  if (ttsMode.value === "off" && "speechSynthesis" in window) speechSynthesis.cancel();
+  if (ttsMode.value === "off") stopSpeaking();
 });
 
 // ---- Status ----
@@ -195,6 +204,7 @@ async function loadStatus() {
     : s.llm.running
       ? pill("AI model not downloaded", "warn", `Run: ollama pull ${s.llm.model}`)
       : pill("AI offline: facts only", "warn", "Ollama is not running. Answers come straight from the verified facts.");
+  aiReady = s.llm.model_ready;
   micReady = s.voice.stt.available;
   const mic = micReady ? pill("Microphone ready", "ok") : pill("No microphone", "off", s.voice.stt.reason);
   $("status").replaceChildren(ai, mic, pill(`${s.codes} codes`, "ok"));
@@ -241,7 +251,7 @@ function section(title, body) {
   return el("div", {}, [el("h3", { textContent: title }), body]);
 }
 
-function renderResult(r) {
+function renderResult(r, pending = false) {
   const box = $("result");
   if (!r.known) {
     box.replaceChildren(el("h2", { textContent: r.code }), el("p", { textContent: r.message }));
@@ -257,7 +267,7 @@ function renderResult(r) {
     el("span", { className: "badge " + f.severity, textContent: f.severity + " severity" }),
     car ? el("span", { className: "pill", textContent: car }) : null,
     v.mileage != null ? el("span", { className: "pill", textContent: v.mileage.toLocaleString() + " miles" }) : null,
-    el("span", { className: "pill", textContent: r.source === "ai" ? "Explained by local AI" : "Verified facts only" }),
+    el("span", { className: "pill", textContent: pending ? "AI is writing a summary…" : r.source === "ai" ? "Explained by local AI" : "Verified facts only" }),
   ]);
   const parts = [
     el("h2", { textContent: `${r.code}: ${f.title}` }), meta,
@@ -275,6 +285,15 @@ function renderResult(r) {
   if (r.previous_codes.length) {
     parts.push(el("div", { className: "note", textContent: "Also looked up for this car before: " + r.previous_codes.join(", ") }));
   }
+  if (r.related.length) {
+    parts.push(section("Other codes on this car", el("div", { className: "related" }, r.related.map((o) => el("button", {
+      type: "button", title: o.plain_english, onclick: () => { $("f-code").value = o.code; explain(); },
+    }, [el("span", { className: "badge " + o.severity, textContent: o.severity }), ` ${o.code}: ${o.title}`])))));
+    parts.push(el("p", { className: "hint", textContent: "Shown first: the most serious code. Codes that appear together often share one cause." }));
+  }
+  if (r.unknown_codes.length) {
+    parts.push(el("div", { className: "note", textContent: "No verified facts yet for: " + r.unknown_codes.join(", ") }));
+  }
   if (r.notice) {
     parts.push(el("div", { className: "note", textContent: "The AI model was not available, so this answer is built directly from the verified facts. (" + r.notice + ")" }));
   }
@@ -284,7 +303,11 @@ function renderResult(r) {
   box.replaceChildren(...parts);
   box.hidden = false;
 
-  current = { vehicle: v, code: r.code };
+  if (pending) {
+    $("followup").hidden = true;
+    return;
+  }
+  current = { vehicle: v, code: r.code, related: r.related.map((o) => o.code) };
   conversation = [{ role: "assistant", content: r.answer.voice_response }];
   $("chat").replaceChildren();
   $("followup").hidden = false;
@@ -295,25 +318,40 @@ async function explain() {
   const code = $("f-code").value.trim();
   if (!code) { $("f-code").focus(); return; }
   showError("");
+  stopSpeaking();
   setBusy(true);
-  $("hint").textContent = "Looking up the facts and asking the AI. On a laptop this can take 10 to 30 seconds…";
+  const mine = ++requestId;
+  const body = { vehicle: readVehicle(), code };
   try {
-    const result = await api("/api/explain", { vehicle: readVehicle(), code });
-    $("f-code").value = result.code;
-    $("hint").textContent = "";
-    renderResult(result);
+    if (!aiReady) {
+      // No AI model: one call, answered from the verified facts.
+      renderResult(await api("/api/explain", body));
+    } else {
+      // Show the verified facts at once, then fill in the AI's explanation.
+      const facts = await api("/api/lookup", body);
+      renderResult(facts, facts.known);
+      if (facts.known) {
+        $("hint").textContent = "The facts are below. The AI is writing a summary for your car, which can take 10 to 30 seconds on a laptop…";
+        let full = facts;
+        try { full = await api("/api/explain", { ...body, record: false }); } catch {}
+        if (mine === requestId) renderResult(full);
+      }
+    }
+    if (mine === requestId) $("hint").textContent = "";
     loadHistory();
   } catch (e) {
     $("hint").textContent = "";
     showError(e.message);
   } finally {
     setBusy(false);
+    loadStatus();
   }
 }
 $("form").addEventListener("submit", (e) => { e.preventDefault(); explain(); });
 
 // ---- Voice input ----
 async function listen(statusNode) {
+  stopSpeaking();  // so the microphone does not record the assistant's own voice
   setBusy(true);
   statusNode.textContent = "Listening… speak now. I stop when you pause.";
   try {
@@ -331,7 +369,7 @@ $("btn-speak").addEventListener("click", async () => {
   showError("");
   const heard = await listen($("hint"));
   if (!heard) return;
-  fillForm(heard.parsed);
+  fillForm({ ...heard.parsed, code: heard.parsed.codes.join(", ") });
   if (heard.parsed.code) {
     await explain();
     $("hint").textContent = `You said: "${heard.text}"`;

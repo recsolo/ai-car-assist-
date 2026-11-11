@@ -25,6 +25,8 @@ def test_finds_code(text, expected):
     "2015 Honda Accord with 128000 miles",
     "P9999",
     "please help",
+    "thank you, 2015 Honda Accord",
+    "as you can see 2012 was a bad year",
 ])
 def test_no_code(text):
     assert parsing.pick_code(text) is None
