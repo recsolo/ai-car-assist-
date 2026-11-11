@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Car Voice Assistant</title>
+<style>
+  :root {
+    --bg: #f3f5f9; --card: #ffffff; --text: #18202c; --muted: #5b6676; --line: #dde2ea;
+    --accent: #1d4ed8; --accent-text: #ffffff; --field: #ffffff;
+    --low-bg: #dcfce7; --low-fg: #14532d; --moderate-bg: #fef3c7; --moderate-fg: #78350f;
+    --high-bg: #ffedd5; --high-fg: #7c2d12; --critical-bg: #fee2e2; --critical-fg: #7f1d1d;
+    --note-bg: #eff4ff; --error-bg: #fee2e2; --error-fg: #7f1d1d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f141b; --card: #19212c; --text: #e7ecf3; --muted: #9aa6b6; --line: #2c3745;
+      --accent: #6ea0ff; --accent-text: #0b1220; --field: #111822;
+      --low-bg: #123a23; --low-fg: #b6f0c9; --moderate-bg: #453208; --moderate-fg: #fde59a;
+      --high-bg: #4a2410; --high-fg: #fdc9a3; --critical-bg: #4c1717; --critical-fg: #fcc0c0;
+      --note-bg: #17263f; --error-bg: #4c1717; --error-fg: #fcc0c0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 56px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 1.6rem; margin: 0; }
+  h2 { font-size: 1.25rem; margin: 0 0 4px; }
+  h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 6px; }
+  p { margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .status { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid var(--line); font-size: .8rem; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+  .dot.ok { background: #22a35a; } .dot.warn { background: #e0a100; } .dot.off { background: #d14343; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  label { display: block; font-size: .85rem; font-weight: 600; color: var(--muted); }
+  input, select { width: 100%; margin-top: 4px; padding: 10px 12px; font: inherit; color: var(--text);
+          background: var(--field); border: 1px solid var(--line); border-radius: 9px; }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { font: inherit; font-weight: 600; padding: 11px 18px; border-radius: 10px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+  .row .grow { flex: 1 1 200px; margin-top: 0; }
+  .hint { color: var(--muted); font-size: .9rem; min-height: 1.4em; margin: 10px 0 0; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .8rem; font-weight: 700; text-transform: capitalize; }
+  .badge.low { background: var(--low-bg); color: var(--low-fg); }
+  .badge.moderate { background: var(--moderate-bg); color: var(--moderate-fg); }
+  .badge.high { background: var(--high-bg); color: var(--high-fg); }
+  .badge.critical { background: var(--critical-bg); color: var(--critical-fg); }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 24px; }
+  .note { background: var(--note-bg); border-radius: 10px; padding: 10px 14px; margin-top: 12px; font-size: .95rem; }
+  .error { background: var(--error-bg); color: var(--error-fg); border-color: transparent; }
+  ul { margin: 0; padding-left: 20px; }
+  .chat { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .bubble { padding: 9px 13px; border-radius: 12px; max-width: 88%; }
+  .bubble.user { align-self: flex-end; background: var(--accent); color: var(--accent-text); }
+  .bubble.assistant { align-self: flex-start; background: var(--note-bg); }
+  .history button { font-weight: 500; padding: 6px 12px; font-size: .9rem; }
+  .disclaimer { color: var(--muted); font-size: .85rem; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI Car Voice Assistant</h1>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+
+  <section class="card">
+    <p>Say or type your car's trouble code. Try: <em>"What does P0420 mean on my 2015 Honda Accord with 128k miles?"</em></p>
+    <form id="form">
+      <div class="grid">
+        <label>Code<input id="f-code" list="code-list" placeholder="P0420" autocomplete="off" required></label>
+        <label>Year<input id="f-year" type="number" min="1980" max="2100" placeholder="2015"></label>
+        <label>Make<input id="f-make" placeholder="Honda"></label>
+        <label>Model<input id="f-model" placeholder="Accord"></label>
+        <label>Mileage<input id="f-mileage" type="number" min="0" placeholder="128000"></label>
+      </div>
+      <datalist id="code-list"></datalist>
+      <div class="row">
+        <button type="button" id="btn-speak">🎤 Speak your question</button>
+        <button type="submit" class="primary" id="btn-explain">Explain this code</button>
+        <label class="grow">Read answers aloud
+          <select id="tts-mode">
+            <option value="browser">Yes, through this browser</option>
+            <option value="server">Yes, through the computer running the app</option>
+            <option value="off">No</option>
+          </select>
+        </label>
+      </div>
+    </form>
+    <p class="hint" id="hint" aria-live="polite"></p>
+  </section>
+
+  <section class="card error" id="error" hidden role="alert"></section>
+  <section class="card" id="result" hidden></section>
+
+  <section class="card" id="followup" hidden>
+    <h2>Ask a follow-up</h2>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <form id="followup-form" class="row">
+      <input class="grow" id="followup-text" placeholder="Is it safe to drive to work?" maxlength="500" aria-label="Follow-up question">
+      <button type="button" id="btn-followup-speak" aria-label="Speak a follow-up question">🎤</button>
+      <button type="submit" class="primary">Ask</button>
+    </form>
+  </section>
+
+  <section class="card history" id="history" hidden>
+    <h2>Recent lookups</h2>
+    <div class="row" id="history-list" style="margin-top:10px"></div>
+  </section>
+
+  <p class="disclaimer">Explanations come from a small set of verified facts and a local AI model. They are a starting point, not a diagnosis. For anything safety-related, see a mechanic.</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null;      // { vehicle, code } for the answer on screen
+let conversation = [];   // follow-up turns for the current answer
+let micReady = false;
+
+// Build elements with textContent only, so model output can never inject HTML.
+function el(tag, props = {}, children = []) {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of [].concat(children)) {
+    if (child != null) node.append(child);
+  }
+  return node;
+}
+
+async function api(path, body) {
+  const options = body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error("Could not reach the app. Is it still running in the terminal?");
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join("; ") : data.detail;
+    throw new Error(detail || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function showError(message) {
+  $("error").textContent = message;
+  $("error").hidden = !message;
+}
+
+function setBusy(busy) {
+  for (const id of ["btn-explain", "btn-speak", "btn-followup-speak"]) {
+    $(id).disabled = busy || (id !== "btn-explain" && !micReady);
+  }
+}
+
+// ---- Speaking ----
+const ttsMode = $("tts-mode");
+function speak(text) {
+  if (!text || ttsMode.value === "off") return;
+  if (ttsMode.value === "browser" && "speechSynthesis" in window) {
+    speechSynthesis.cancel();
+    speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  } else {
+    api("/api/speak", { text }).catch((e) => { $("hint").textContent = e.message; });
+  }
+}
+ttsMode.addEventListener("change", () => {
+  try { localStorage.setItem("ttsMode", ttsMode.value); } catch {}
+  if (ttsMode.value === "off" && "speechSynthesis" in window) speechSynthesis.cancel();
+});
+
+// ---- Status ----
+function pill(label, state, title) {
+  return el("span", { className: "pill", title: title || "" }, [el("span", { className: "dot " + state }), label]);
+}
+async function loadStatus() {
+  let s;
+  try { s = await api("/api/status"); } catch { return; }
+  const ai = s.llm.model_ready
+    ? pill("AI model ready", "ok", s.llm.model)
+    : s.llm.running
+      ? pill("AI model not downloaded", "warn", `Run: ollama pull ${s.llm.model}`)
+      : pill("AI offline: facts only", "warn", "Ollama is not running. Answers come straight from the verified facts.");
+  micReady = s.voice.stt.available;
+  const mic = micReady ? pill("Microphone ready", "ok") : pill("No microphone", "off", s.voice.stt.reason);
+  $("status").replaceChildren(ai, mic, pill(`${s.codes} codes`, "ok"));
+  for (const id of ["btn-speak", "btn-followup-speak"]) {
+    $(id).disabled = !micReady;
+    $(id).title = micReady ? "" : `Voice input unavailable: ${s.voice.stt.reason}`;
+  }
+  if (!s.voice.tts) ttsMode.querySelector('[value="server"]').disabled = true;
+  let saved = null;
+  try { saved = localStorage.getItem("ttsMode"); } catch {}
+  if (!("speechSynthesis" in window)) ttsMode.querySelector('[value="browser"]').disabled = true;
+  const preferred = saved || "browser";
+  const option = ttsMode.querySelector(`[value="${preferred}"]`);
+  ttsMode.value = option && !option.disabled ? preferred : (s.voice.tts ? "server" : "off");
+}
+
+async function loadCodes() {
+  try {
+    const codes = await api("/api/codes");
+    $("code-list").replaceChildren(...codes.map((c) => el("option", { value: c.code, label: c.title })));
+  } catch {}
+}
+
+// ---- Form ----
+function readVehicle() {
+  const num = (id) => ($(id).value.trim() === "" ? null : Number($(id).value));
+  return {
+    year: num("f-year"), make: $("f-make").value.trim() || null,
+    model: $("f-model").value.trim() || null, mileage: num("f-mileage"),
+  };
+}
+function fillForm(v) {
+  if (v.code) $("f-code").value = v.code;
+  if (v.year) $("f-year").value = v.year;
+  if (v.make) $("f-make").value = v.make;
+  if (v.model) $("f-model").value = v.model;
+  if (v.mileage != null) $("f-mileage").value = v.mileage;
+}
+
+function list(items) {
+  return el("ul", {}, items.map((item) => el("li", { textContent: item })));
+}
+function section(title, body) {
+  return el("div", {}, [el("h3", { textContent: title }), body]);
+}
+
+function renderResult(r) {
+  const box = $("result");
+  if (!r.known) {
+    box.replaceChildren(el("h2", { textContent: r.code }), el("p", { textContent: r.message }));
+    box.hidden = false;
+    $("followup").hidden = true;
+    current = null;
+    speak(r.message);
+    return;
+  }
+  const f = r.fact, v = r.vehicle;
+  const car = [v.year, v.make, v.model].filter(Boolean).join(" ");
+  const meta = el("div", { className: "meta" }, [
+    el("span", { className: "badge " + f.severity, textContent: f.severity + " severity" }),
+    car ? el("span", { className: "pill", textContent: car }) : null,
+    v.mileage != null ? el("span", { className: "pill", textContent: v.mileage.toLocaleString() + " miles" }) : null,
+    el("span", { className: "pill", textContent: r.source === "ai" ? "Explained by local AI" : "Verified facts only" }),
+  ]);
+  const parts = [
+    el("h2", { textContent: `${r.code}: ${f.title}` }), meta,
+    el("p", { textContent: r.answer.summary }),
+    section("What to do", el("p", { textContent: r.answer.advice })),
+    el("div", { className: "facts" }, [
+      section("Safe to drive?", el("p", { textContent: f.safe_to_drive })),
+      section("Typical repair cost", el("p", { textContent: r.cost_range })),
+      section("Common causes", list(f.common_causes)),
+      section("What to check next", list(f.next_checks)),
+    ]),
+    section("Before you pay for parts", el("p", { textContent: f.misdiagnosis_notes })),
+  ];
+  if (r.mileage_note) parts.push(el("div", { className: "note", textContent: "At this mileage: " + r.mileage_note }));
+  if (r.previous_codes.length) {
+    parts.push(el("div", { className: "note", textContent: "Also looked up for this car before: " + r.previous_codes.join(", ") }));
+  }
+  if (r.notice) {
+    parts.push(el("div", { className: "note", textContent: "The AI model was not available, so this answer is built directly from the verified facts. (" + r.notice + ")" }));
+  }
+  parts.push(el("div", { className: "row" }, el("button", {
+    type: "button", textContent: "🔊 Read aloud again", onclick: () => speak(r.answer.voice_response),
+  })));
+  box.replaceChildren(...parts);
+  box.hidden = false;
+
+  current = { vehicle: v, code: r.code };
+  conversation = [{ role: "assistant", content: r.answer.voice_response }];
+  $("chat").replaceChildren();
+  $("followup").hidden = false;
+  speak(r.answer.voice_response);
+}
+
+async function explain() {
+  const code = $("f-code").value.trim();
+  if (!code) { $("f-code").focus(); return; }
+  showError("");
+  setBusy(true);
+  $("hint").textContent = "Looking up the facts and asking the AI. On a laptop this can take 10 to 30 seconds…";
+  try {
+    const result = await api("/api/explain", { vehicle: readVehicle(), code });
+    $("f-code").value = result.code;
+    $("hint").textContent = "";
+    renderResult(result);
+    loadHistory();
+  } catch (e) {
+    $("hint").textContent = "";
+    showError(e.message);
+  } finally {
+    setBusy(false);
+  }
+}
+$("form").addEventListener("submit", (e) => { e.preventDefault(); explain(); });
+
+// ---- Voice input ----
+async function listen(statusNode) {
+  setBusy(true);
+  statusNode.textContent = "Listening… speak now. I stop when you pause.";
+  try {
+    return await api("/api/listen", {});
+  } catch (e) {
+    statusNode.textContent = "";
+    showError(e.message);
+    return null;
+  } finally {
+    setBusy(false);
+  }
+}
+
+$("btn-speak").addEventListener("click", async () => {
+  showError("");
+  const heard = await listen($("hint"));
+  if (!heard) return;
+  fillForm(heard.parsed);
+  if (heard.parsed.code) {
+    await explain();
+    $("hint").textContent = `You said: "${heard.text}"`;
+  } else {
+    $("hint").textContent = `You said: "${heard.text}". I did not catch a code, so type it in the Code box.`;
+  }
+});
+
+// ---- Follow-ups ----
+function addBubble(role, text) {
+  const bubble = el("div", { className: "bubble " + role, textContent: text });
+  $("chat").append(bubble);
+  bubble.scrollIntoView({ block: "nearest" });
+  return bubble;
+}
+
+async function askFollowup(question) {
+  if (!current || !question) return;
+  showError("");
+  addBubble("user", question);
+  const pending = addBubble("assistant", "Thinking…");
+  try {
+    const result = await api("/api/followup", { ...current, question, history: conversation.slice(-10) });
+    pending.textContent = result.answer;
+    conversation.push({ role: "user", content: question }, { role: "assistant", content: result.answer });
+    speak(result.answer);
+  } catch (e) {
+    pending.remove();
+    showError(e.message);
+  }
+}
+$("followup-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const question = $("followup-text").value.trim();
+  $("followup-text").value = "";
+  askFollowup(question);
+});
+$("btn-followup-speak").addEventListener("click", async () => {
+  const input = $("followup-text");
+  const placeholder = input.placeholder;
+  const status = { set textContent(v) { input.placeholder = v || placeholder; } };
+  const heard = await listen(status);
+  input.placeholder = placeholder;
+  if (heard) askFollowup(heard.text);
+});
+
+// ---- History ----
+async function loadHistory() {
+  let items;
+  try { items = await api("/api/history"); } catch { return; }
+  $("history").hidden = items.length === 0;
+  $("history-list").replaceChildren(...items.map((item) => {
+    const car = [item.year, item.make, item.model].filter(Boolean).join(" ");
+    return el("button", {
+      type: "button", title: item.title, textContent: car ? `${item.code} · ${car}` : item.code,
+      onclick: () => {
+        for (const id of ["f-year", "f-make", "f-model", "f-mileage"]) $(id).value = "";
+        fillForm(item);
+        explain();
+      },
+    });
+  }));
+}
+
+loadStatus();
+loadCodes();
+loadHistory();
+</script>
+</body>
+</html>
